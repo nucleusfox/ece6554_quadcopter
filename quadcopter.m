@@ -117,6 +117,44 @@ classdef quadcopter < handle
             % stack derivatives
             dx = [vT; OOYdot; aT; wdot];
         end
+        
+        function dx = dynamics_symbolic(self,xvec,uvec)
+            syms m;
+            syms I [3 1];
+            I = diag(I);
+            syms Dt [3 3];
+            syms Dw [3 3];
+            syms b;
+             
+            % environment parameters
+            syms g;
+
+            % Get orientation coordinate representation.
+            oCoords = xvec(4:6);
+                                  
+            % Get translational velocity and body twist / angular rates.
+            vT    = xvec(7:9);
+            w     = xvec(10:12);
+
+            % Get actuator input to state input matrices.
+            [Bt, Ba] = self.Bfun(b);
+            
+            % Get applied u.
+            u = uvec;
+            
+            % translation acceleration. 
+            R  = self.coords.toR(oCoords);
+            aT = [0;0;-g]  + (-Dt * vT + R*Bt*u)/m;
+            
+            % rotational dynamics
+            wdot = I\( Ba*u - cross(w,I*w) - Dw*w );
+            
+            % Coordinate angle dynamics 
+            OOYdot = self.coords.toW(oCoords) \ w;
+            
+            % stack derivatives
+            dx = [vT; OOYdot; aT; wdot];
+        end
 
         %======================= linearController ======================
         %
@@ -204,18 +242,15 @@ classdef quadcopter < handle
                 theta = oCoords(2);
                 psi   = oCoords(3); 
                 
-                R = zeros(3);
-                R(1,1) = cos(psi)*cos(theta) - sin(phi)*sin(psi)*sin(theta);
-                R(1,2) = -cos(phi)*sin(psi);
-                R(1,3) = cos(psi)*sin(theta) + cos(theta)*sin(phi)*sin(psi);
-                
-                R(2,1) = cos(theta)*sin(psi) + cos(psi)*sin(phi)*sin(theta);
-                R(2,2) = cos(phi)*cos(psi);
-                R(2,3) = sin(psi)*sin(theta) - cos(psi)*cos(theta)*sin(phi);
-                
-                R(3,1) = -cos(phi)*sin(theta);
-                R(3,2) = sin(phi);
-                R(3,3) = cos(phi)*cos(theta);
+                R = [cos(psi)*cos(theta) - sin(phi)*sin(psi)*sin(theta), ...
+                    -cos(phi)*sin(psi), ...
+                    cos(psi)*sin(theta) + cos(theta)*sin(phi)*sin(psi);   
+                    cos(theta)*sin(psi) + cos(psi)*sin(phi)*sin(theta), ...
+                    cos(phi)*cos(psi), ...
+                    sin(psi)*sin(theta) - cos(psi)*cos(theta)*sin(phi);
+                    -cos(phi)*sin(theta), ...
+                    sin(phi), ...
+                    cos(phi)*cos(theta)];
                 
             end
 
