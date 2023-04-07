@@ -173,9 +173,9 @@ classdef quadcopter < handle
             B = double(subs(jacobian(dynamics,u),[x;u],[x0;u0]));
         end
         
-        function [P,K] = getLinearGain(self,Q)
+        function K = getLinearGain(self,Q,R)
             [A,B] = getLinearization(self);
-            [P,L,K] = care(A,B,Q);
+            K = lqr(A,B,Q,R);
         end
         
         function setLinearGain(self,K)

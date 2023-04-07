@@ -11,10 +11,12 @@ end                                 % otherwise, environment stays as is.
 
 
 robo = quadcopter();
-Q = eye(12);
-[P,K] = robo.getLinearGain(Q);
-robo.setLinearGain(K);
 
+q = 10;
+Q = blkdiag(q*eye(6),eye(6));
+R = eye(4);
+K = robo.getLinearGain(Q,R);
+robo.setLinearGain(K);
 
 g = 9.81;
 %u = @(t,x) robo.param.m*g*[1.0101;1.0100;1.010;1.010]/4;
