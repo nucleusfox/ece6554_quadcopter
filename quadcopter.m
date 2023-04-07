@@ -10,6 +10,8 @@ classdef quadcopter < handle
                        'kF',    6.11e-8,...
                        'gamma', 1.5e-9/6.11e-8,...
                        'km',    20)
+                   
+        linContr = struct('K', zeros([4 12]))
         
         tSim
         xSim % states are x, dx, th, dth, i_motor
@@ -155,6 +157,30 @@ classdef quadcopter < handle
             % stack derivatives
             dx = [vT; OOYdot; aT; wdot];
         end
+        
+        function [A,B] = getLinearization(self)
+            syms x [12 1];
+            syms u [4 1];
+            ufun = @(t,x) u;
+
+            g = 9.81;
+            x0 = zeros(12,1);
+            u0 = self.param.m*g*[1;1;1;1]/(4*self.param.b);
+
+            dynamics = self.dynamics(0,x,ufun);
+
+            A = double(subs(jacobian(dynamics,x),[x;u],[x0;u0]));
+            B = double(subs(jacobian(dynamics,u),[x;u],[x0;u0]));
+        end
+        
+        function [P,K] = getLinearGain(self,Q)
+            [A,B] = getLinearization(self);
+            [P,L,K] = care(A,B,Q);
+        end
+        
+        function setLinearGain(self,K)
+            self.linContr.K = K;
+        end
 
         %======================= linearController ======================
         %
@@ -169,15 +195,19 @@ classdef quadcopter < handle
         function u = linearController(self, t, xvec, xref, aref)
             
             % Compute any feedforward component.
+            g = 9.81;
             if (nargin > 5)
+              uFF = self.param.m*g*[1;1;1;1]/(4*self.param.b);
               % Handle feedforward, otherwise there is none.
             else
-              uFF = 0; % Make proper dimension.
+              uFF = self.param.m*g*[1;1;1;1]/(4*self.param.b); % Make proper dimension.
             end
 
             % Compute error-feedback.
+            errFB = self.linContr.K*(xvec-xref(t));
 
             % Pack into control.
+            u = uFF - errFB;
             
         end
 
