@@ -10,8 +10,6 @@ classdef quadcopter < handle
                        'kF',    6.11e-8,...
                        'gamma', 1.5e-9/6.11e-8,...
                        'km',    20)
-                   
-        linContr = struct('K', zeros([4 12]))
         
         tSim
         xSim % states are x, dx, th, dth, i_motor
@@ -20,6 +18,12 @@ classdef quadcopter < handle
 
         Bfun
         coords
+        
+        linContr = struct('K', zeros([4 12]),...
+                          'P', zeros([12 12]),...
+                          'Q', eye(12))
+        
+        
         
     end
     
@@ -52,7 +56,7 @@ classdef quadcopter < handle
         % function.
         %
         function [tSim, xSim, xdotSim, uSim] = runSim(self, tspan, x0, u)
-            sys = @(t,x) self.dynamics(t, x, u);
+            sys = @(t,x) self.dynamics(t, x, u(t,x));
 
             % Simulate the system.
             [tSim, xSim] = ode45(sys, tspan, x0);
@@ -67,7 +71,7 @@ classdef quadcopter < handle
                 x = xSim(i,:)';
                 t = tSim(i);
                 uSim(i,:) = u(t, x)';
-                xdotSim(i,:) = self.dynamics(t, x, u)';
+                xdotSim(i,:) = self.dynamics(t, x, u(t,x))';
             end
             
             % Store variables in case needed for later.
@@ -103,15 +107,12 @@ classdef quadcopter < handle
             % Get actuator input to state input matrices.
             [Bt, Ba] = self.Bfun(self.param.b);
             
-            % Get applied u.
-            u = uvec(t,xvec);
-            
             % translation acceleration. 
             R  = self.coords.toR(oCoords);
-            aT = [0;0;-g]  + (-self.param.Dt * vT + R*Bt*u)/m;
+            aT = [0;0;-g]  + (-self.param.Dt * vT + R*Bt*uvec)/m;
             
             % rotational dynamics
-            wdot = I\( Ba*u - cross(w,I*w) - self.param.Dw*w );
+            wdot = I\( Ba*uvec - cross(w,I*w) - self.param.Dw*w );
             
             % Coordinate angle dynamics 
             OOYdot = self.coords.toW(oCoords) \ w;
@@ -161,25 +162,29 @@ classdef quadcopter < handle
         function [A,B] = getLinearization(self)
             syms x [12 1];
             syms u [4 1];
-            ufun = @(t,x) u;
 
             g = 9.81;
             x0 = zeros(12,1);
             u0 = self.param.m*g*[1;1;1;1]/(4*self.param.b);
 
-            dynamics = self.dynamics(0,x,ufun);
+            dynamics = self.dynamics(0,x,u);
 
             A = double(subs(jacobian(dynamics,x),[x;u],[x0;u0]));
             B = double(subs(jacobian(dynamics,u),[x;u],[x0;u0]));
         end
         
-        function K = getLinearGain(self,Q,R)
+        function K = setLinearGain(self,Q,R)
             [A,B] = getLinearization(self);
-            K = lqr(A,B,Q,R);
-        end
-        
-        function setLinearGain(self,K)
+            [K,S,P] = lqr(A,B,Q,R);
+
+
+            % pole placement
+            %poles = [-1; -1.5; -1.7; -2; -2.5; -2.7; -3; -3.5; -3.7; -4; -4.5; -4.7];
+            %K = place(A,B,poles);
+            
             self.linContr.K = K;
+            self.linContr.P = S;
+            self.linContr.Q = Q;
         end
 
         %======================= linearController ======================
@@ -205,6 +210,25 @@ classdef quadcopter < handle
 
             % Compute error-feedback.
             errFB = self.linContr.K*(xvec-xref(t));
+
+            % Pack into control.
+            u = uFF - errFB;
+            
+        end
+        
+        function u = mimoDMRAC(self, t, xvec, xref, aref)
+            
+            % Compute any feedforward component.
+            g = 9.81;
+            if (nargin > 5)
+              uFF = self.param.m*g*[1;1;1;1]/(4*self.param.b);
+              % Handle feedforward, otherwise there is none.
+            else
+              uFF = self.param.m*g*[1;1;1;1]/(4*self.param.b); % Make proper dimension.
+            end
+
+            % Compute error-feedback.
+            errFB = self.linDMRAC.Kx*xvec - self.linDMRAC.Kr*xref(t);
 
             % Pack into control.
             u = uFF - errFB;
@@ -327,4 +351,5 @@ classdef quadcopter < handle
     end
 
 end
+
 
