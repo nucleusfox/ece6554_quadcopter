@@ -19,6 +19,12 @@ classdef quadcopter < handle
         Bfun
         coords
         
+        linContr = struct('K', zeros([4 12]),...
+                          'P', zeros([12 12]),...
+                          'Q', eye(12))
+        
+        
+        
     end
     
     methods
@@ -50,7 +56,7 @@ classdef quadcopter < handle
         % function.
         %
         function [tSim, xSim, xdotSim, uSim] = runSim(self, tspan, x0, u)
-            sys = @(t,x) self.dynamics(t, x, u);
+            sys = @(t,x) self.dynamics(t, x, u(t,x));
 
             % Simulate the system.
             [tSim, xSim] = ode45(sys, tspan, x0);
@@ -65,7 +71,7 @@ classdef quadcopter < handle
                 x = xSim(i,:)';
                 t = tSim(i);
                 uSim(i,:) = u(t, x)';
-                xdotSim(i,:) = self.dynamics(t, x, u)';
+                xdotSim(i,:) = self.dynamics(t, x, u(t,x))';
             end
             
             % Store variables in case needed for later.
@@ -101,21 +107,86 @@ classdef quadcopter < handle
             % Get actuator input to state input matrices.
             [Bt, Ba] = self.Bfun(self.param.b);
             
-            % Get applied u.
-            u = uvec(t,xvec);
-            
             % translation acceleration. 
             R  = self.coords.toR(oCoords);
-            aT = [0;0;-g]  + (-self.param.Dt * vT + R*Bt*u)/m;
+            aT = [0;0;-g]  + (-self.param.Dt * vT + R*Bt*uvec)/m;
             
             % rotational dynamics
-            wdot = I\( Ba*u - cross(w,I*w) - self.param.Dw*w );
+            wdot = I\( Ba*uvec - cross(w,I*w) - self.param.Dw*w );
             
             % Coordinate angle dynamics 
             OOYdot = self.coords.toW(oCoords) \ w;
             
             % stack derivatives
             dx = [vT; OOYdot; aT; wdot];
+        end
+        
+        function dx = dynamics_symbolic(self,xvec,uvec)
+            syms m;
+            syms I [3 3];
+            syms Dt [3 3];
+            syms Dw [3 3];
+            syms b;
+             
+            % environment parameters
+            syms g;
+
+            % Get orientation coordinate representation.
+            oCoords = xvec(4:6);
+                                  
+            % Get translational velocity and body twist / angular rates.
+            vT    = xvec(7:9);
+            w     = xvec(10:12);
+
+            % Get actuator input to state input matrices.
+            [Bt, Ba] = self.Bfun(b);
+            
+            % Get applied u.
+            u = uvec;
+            
+            % translation acceleration. 
+            R  = self.coords.toR(oCoords);
+            aT = [0;0;-g]  + (-Dt * vT + R*Bt*u)/m;
+            
+            % rotational dynamics
+            wdot = I\( Ba*u - cross(w,I*w) - Dw*w );
+            
+            % Coordinate angle dynamics 
+            OOYdot = self.coords.toW(oCoords) \ w;
+            
+            % stack derivatives
+            dx = [vT; OOYdot; aT; wdot];
+        end
+
+        function [Jx,Ju,x,u] = getJacobian(self)
+            syms x [12 1];
+            syms u [4 1];
+            dynamics = self.dynamics(0,x,u);
+            Jx = jacobian(dynamics,x);
+            Ju = jacobian(dynamics,u);
+        end
+        
+        function [A,B] = getLinearization(self)
+            g = 9.81;
+            x0 = zeros(12,1);
+            u0 = self.param.m*g*[1;1;1;1]/(4*self.param.b);
+
+            [Jx,Ju,x,u] = self.getJacobian();
+            A = double(subs(Jx,[x;u],[x0;u0]));
+            B = double(subs(Ju,[x;u],[x0;u0]));
+        end
+        
+        function K = setLQR(self,Q,R)
+            [A,B] = getLinearization(self);
+            [K,S,P] = lqr(A,B,Q,R);
+            
+            self.linContr.K = K;
+            self.linContr.P = S;
+            self.linContr.Q = Q;
+        end
+        
+        function K = setLinearGain(self,K)
+            self.linContr.K = K;
         end
 
         %======================= linearController ======================
@@ -131,15 +202,38 @@ classdef quadcopter < handle
         function u = linearController(self, t, xvec, xref, aref)
             
             % Compute any feedforward component.
+            g = 9.81;
             if (nargin > 5)
+              uFF = self.param.m*g*[1;1;1;1]/(4*self.param.b);
               % Handle feedforward, otherwise there is none.
             else
-              uFF = 0; % Make proper dimension.
+              uFF = self.param.m*g*[1;1;1;1]/(4*self.param.b); % Make proper dimension.
             end
 
             % Compute error-feedback.
+            errFB = self.linContr.K*(xvec-xref(t));
 
             % Pack into control.
+            u = uFF - errFB;
+            
+        end
+        
+        function u = mimoDMRAC(self, t, xvec, xref, aref)
+            
+            % Compute any feedforward component.
+            g = 9.81;
+            if (nargin > 5)
+              uFF = self.param.m*g*[1;1;1;1]/(4*self.param.b);
+              % Handle feedforward, otherwise there is none.
+            else
+              uFF = self.param.m*g*[1;1;1;1]/(4*self.param.b); % Make proper dimension.
+            end
+
+            % Compute error-feedback.
+            errFB = self.linDMRAC.Kx*xvec - self.linDMRAC.Kr*xref(t);
+
+            % Pack into control.
+            u = uFF - errFB;
             
         end
 
@@ -204,18 +298,15 @@ classdef quadcopter < handle
                 theta = oCoords(2);
                 psi   = oCoords(3); 
                 
-                R = zeros(3);
-                R(1,1) = cos(psi)*cos(theta) - sin(phi)*sin(psi)*sin(theta);
-                R(1,2) = -cos(phi)*sin(psi);
-                R(1,3) = cos(psi)*sin(theta) + cos(theta)*sin(phi)*sin(psi);
-                
-                R(2,1) = cos(theta)*sin(psi) + cos(psi)*sin(phi)*sin(theta);
-                R(2,2) = cos(phi)*cos(psi);
-                R(2,3) = sin(psi)*sin(theta) - cos(psi)*cos(theta)*sin(phi);
-                
-                R(3,1) = -cos(phi)*sin(theta);
-                R(3,2) = sin(phi);
-                R(3,3) = cos(phi)*cos(theta);
+                R = [cos(psi)*cos(theta) - sin(phi)*sin(psi)*sin(theta), ...
+                    -cos(phi)*sin(psi), ...
+                    cos(psi)*sin(theta) + cos(theta)*sin(phi)*sin(psi);   
+                    cos(theta)*sin(psi) + cos(psi)*sin(phi)*sin(theta), ...
+                    cos(phi)*cos(psi), ...
+                    sin(psi)*sin(theta) - cos(psi)*cos(theta)*sin(phi);
+                    -cos(phi)*sin(theta), ...
+                    sin(phi), ...
+                    cos(phi)*cos(theta)];
                 
             end
 
@@ -258,8 +349,22 @@ classdef quadcopter < handle
 
         end
           
+        function plot(tSim, xSim)
+            figure();
+              subplot(211);
+              plot(tSim,xSim(:,1:3));
+              ylabel("q");
+              xlabel("t");
+              legend('x','y','z');
+              subplot(212);
+              plot(tSim,xSim(:,4:6));
+              ylabel("R");
+              xlabel("t");
+              legend("$R_x$","$R_y$","$R_z$");
+        end
 
     end
 
 end
+
 
