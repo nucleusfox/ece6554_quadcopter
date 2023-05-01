@@ -215,26 +215,6 @@ classdef quadcopter < handle
 
             % Pack into control.
             u = uFF - errFB;
-            
-        end
-        
-        function u = mimoDMRAC(self, t, xvec, xref, aref)
-            
-            % Compute any feedforward component.
-            g = 9.81;
-            if (nargin > 5)
-              uFF = self.param.m*g*[1;1;1;1]/(4*self.param.b);
-              % Handle feedforward, otherwise there is none.
-            else
-              uFF = self.param.m*g*[1;1;1;1]/(4*self.param.b); % Make proper dimension.
-            end
-
-            % Compute error-feedback.
-            errFB = self.linDMRAC.Kx*xvec - self.linDMRAC.Kr*xref(t);
-
-            % Pack into control.
-            u = uFF - errFB;
-            
         end
 
         %===================== geometricController =====================

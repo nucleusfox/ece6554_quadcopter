@@ -18,10 +18,7 @@ classdef qcNMPC < handle
         params = struct('Duration', 10, ...
                         'Ts', 0.1, ...
                         'ph', 18, ...
-                        'ch', 2, ...
-                        'm', 0.5, ...
-                        'b', 1 ...
-                        )
+                        'ch', 2)
                 
     end
     
@@ -40,8 +37,8 @@ classdef qcNMPC < handle
                 end
             end
 
-            obj.nlmpcobj.Model.StateFcn = @(x,u) model.dynamics(0,x,u);
-            [A,B,xsym,usym] = model.getJacobian();
+            obj.nlmpcobj.Model.StateFcn = @(x,u) obj.model.dynamics(0,x,u);
+            [A,B,xsym,usym] = obj.model.getJacobian();
             obj.nlmpcobj.Jacobian.StateFcn = matlabFunction(A,B,"vars",{xsym,usym});
 
             %rng(0)
@@ -62,7 +59,9 @@ classdef qcNMPC < handle
             obj.nlmpcobj.Weights.ManipulatedVariablesRate = [0.1 0.1 0.1 0.1];
             
             g = 9.81;
-            obj.nloptions.MVTarget = obj.params.m*g*[1 1 1 1]/(4*obj.params.b);
+            m = obj.model.param.m;
+            b = obj.model.param.b;
+            obj.nloptions.MVTarget = m*g*[1 1 1 1]/(4*b);
             obj.lastMV = obj.nloptions.MVTarget;
             
             obj.nlmpcobj.Ts = obj.params.Ts;

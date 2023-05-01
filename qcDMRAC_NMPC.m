@@ -99,9 +99,9 @@ classdef qcDMRAC_NMPC < handle
             xvec_m = xvec(13:24);
             
             % update system using actual robot dynamics
-            dx(1:12) = self.robot.dynamics(t,xvec,uvec);
+            dx(1:12) = self.robot.dynamics(t,xvec_x,uvec);
             % reference model with NMPC
-            dx(13:24) = self.model.dynamics(t,xvec(13:24),umvec);
+            dx(13:24) = self.model.dynamics(t,xvec_m,umvec);
             
             % update adaptive gains
             f = (xvec_x - xvec_m)'*self.linDMRAC.Pm*self.linDMRAC.Bdir;
@@ -186,6 +186,43 @@ classdef qcDMRAC_NMPC < handle
               hold on;
               grid on;
               legend("$R_x$","$R_y$","$R_z$");
+        end
+
+        function plotU(tSim,uSim)
+            figure();
+              plot(tSim, uSim, '.');
+              xlabel('t');
+              ylabel('$u$',"Interpreter", "latex");
+              hold on;
+              grid on;
+        end
+
+        function plotK(tSim,xSim)
+            f = figure();
+
+              f.Position = [680, 348, 560, 630];
+            
+              subplot(3,1,1);
+              plot(tSim, xSim(:,25:72), '-');
+              xlabel('t');
+              ylabel('$K_x$',"Interpreter", "latex");
+              %title('Coords', Interpreter='latex');
+              hold on;
+              grid on;
+              
+              subplot(3,1,2);
+              plot(tSim,xSim(:,73:120), '-');
+              xlabel('t');
+              ylabel('$K_r$', "Interpreter", "latex");
+              hold on;
+              grid on;
+
+              subplot(3,1,3);
+              plot(tSim,xSim(:,121:124), '-');
+              xlabel('t');
+              ylabel('$\hat{\alpha}$', "Interpreter", "latex");
+              hold on;
+              grid on;
         end
     end
 end
