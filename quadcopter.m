@@ -173,18 +173,17 @@ classdef quadcopter < handle
             B = double(subs(jacobian(dynamics,u),[x;u],[x0;u0]));
         end
         
-        function K = setLinearGain(self,Q,R)
+        function K = setLQR(self,Q,R)
             [A,B] = getLinearization(self);
             [K,S,P] = lqr(A,B,Q,R);
-
-
-            % pole placement
-            %poles = [-1; -1.5; -1.7; -2; -2.5; -2.7; -3; -3.5; -3.7; -4; -4.5; -4.7];
-            %K = place(A,B,poles);
             
             self.linContr.K = K;
             self.linContr.P = S;
             self.linContr.Q = Q;
+        end
+        
+        function K = setLinearGain(self,K)
+            self.linContr.K = K;
         end
 
         %======================= linearController ======================
@@ -347,6 +346,19 @@ classdef quadcopter < handle
 
         end
           
+        function plot(tSim, xSim)
+            figure();
+              subplot(211);
+              plot(tSim,xSim(:,1:3));
+              ylabel("q");
+              xlabel("t");
+              legend('x','y','z');
+              subplot(212);
+              plot(tSim,xSim(:,4:6));
+              ylabel("R");
+              xlabel("t");
+              legend("$R_x$","$R_y$","$R_z$");
+        end
 
     end
 
